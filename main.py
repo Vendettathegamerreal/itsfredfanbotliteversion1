@@ -26,7 +26,7 @@ OVERLAY_FILENAME = "overlay.png"
 
 DISABLED_MODELS = {}
 
-CHARACTERS = {
+DEFAULT_CHARACTERS = {
     "Fred": {
         "name": "Fred Figglehorn",
         "avatar": "https://i.pinimg.com/1200x/72/60/08/726008f18672dfc798180d1185d977ae.jpg",
@@ -47,10 +47,13 @@ CHARACTERS = {
     },
 }
 
+CHARACTERS = DEFAULT_CHARACTERS.copy()
+GUILD_USER_CHARACTERS = {}
+
 FISH_AUDIO_VOICES = {
-    "Fred": "76894df0ac5f4181b63dfc9aadb8b087",
-    "Kevin": "d9688399ca654cb8a0bc8a5f87b4eca8",
-    "Angry Fred": "2917825b4cbe4eb185c680f60651e5ce",
+    "Fred": "fish audio voice",
+    "Kevin": "fish audio voice",
+    "Angry Fred": "fish audio voice",
 }
 
 
@@ -60,19 +63,20 @@ class ParodyBot(commands.Bot):
         intents.message_content = True
         super().__init__(command_prefix="!", intents=intents)
         self.episode_queue = asyncio.Queue()
+        self.queue_list = []  # List tracking metadata for active/queued items
         self.worker_task = None
 
     async def setup_hook(self):
         await self.tree.sync()
         print("Slash commands synced successfully.")
-        # Start the sequential background queue for episode generation
         self.worker_task = asyncio.create_task(self.episode_queue_worker())
 
     async def episode_queue_worker(self):
         """Processes episode creation requests sequentially in the background."""
         while True:
-            task_func, interaction = await self.episode_queue.get()
+            task_func, interaction, metadata = await self.episode_queue.get()
             try:
+                metadata["status"] = "Generating"
                 await task_func(interaction)
             except Exception as e:
                 print(f"Error processing episode task: {e}")
@@ -83,6 +87,8 @@ class ParodyBot(commands.Bot):
                 except Exception:
                     pass
             finally:
+                if metadata in self.queue_list:
+                    self.queue_list.remove(metadata)
                 self.episode_queue.task_done()
 
 
@@ -105,8 +111,8 @@ async def generate_tts_audio(text: str, voice: str) -> io.BytesIO:
     audio_data.seek(0)
     return audio_data
 
+
 async def generate_fish_audio_tts(text: str, reference_id: str) -> io.BytesIO:
-    """Generates Fish Audio TTS via OpenRouter API using S2.1 Pro Free."""
     url = "https://openrouter.ai/api/v1/audio/speech"
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
@@ -129,8 +135,8 @@ async def generate_fish_audio_tts(text: str, reference_id: str) -> io.BytesIO:
                 err_text = await resp.text()
                 raise Exception(f"OpenRouter TTS Error ({resp.status}): {err_text}")
 
+
 async def request_openrouter_script(prompt: str, model_id: str) -> str:
-    """Routes script generation request to Gemini or OpenRouter."""
     if model_id.startswith("gemini-"):
         safety_settings = [
             types.SafetySetting(
@@ -161,7 +167,7 @@ async def request_openrouter_script(prompt: str, model_id: str) -> str:
         )
         return response.text.strip() if response.text else ""
 
-    else:  # OpenRouter API
+    else:
         url = "https://openrouter.ai/api/v1/chat/completions"
         headers = {
             "Authorization": f"Bearer {OPENROUTER_API_KEY}",
@@ -196,6 +202,53 @@ async def restart(interaction: discord.Interaction):
     os.execv(sys.executable, [sys.executable] + sys.argv)
 
 
+@bot.tree.command(name="add_user_character", description="Add server users in the channel as characters for this server's episodes.")
+@app_commands.describe(user="Select a specific user (leave blank to pick active users from channel history)")
+async def add_user_character(interaction: discord.Interaction, user: discord.Member = None):
+    if not interaction.guild:
+        await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+        return
+
+    guild_id = interaction.guild.id
+    if guild_id not in GUILD_USER_CHARACTERS:
+        GUILD_USER_CHARACTERS[guild_id] = {}
+
+    if user:
+        added_members = [user]
+    else:
+        await interaction.response.defer(ephemeral=True)
+        added_members = []
+        async for msg in interaction.channel.history(limit=50):
+            if isinstance(msg.author, discord.Member) and not msg.author.bot:
+                if msg.author not in added_members:
+                    added_members.append(msg.author)
+
+    if not added_members:
+        msg_text = "No non-bot users found in recent channel activity."
+        if interaction.response.is_done():
+            await interaction.followup.send(msg_text, ephemeral=True)
+        else:
+            await interaction.response.send_message(msg_text, ephemeral=True)
+        return
+
+    added_names = []
+    for member in added_members:
+        display_name = member.display_name
+        GUILD_USER_CHARACTERS[guild_id][display_name] = {
+            "name": display_name,
+            "avatar": member.display_avatar.url,
+            "color": member.color if member.color != discord.Color.default() else discord.Color.blue(),
+            "voice": "en-GB-ThomasNeural",
+        }
+        added_names.append(display_name)
+
+    response_text = f"Successfully added **{len(added_names)}** local user character(s) to this server: {', '.join(added_names)}"
+    if interaction.response.is_done():
+        await interaction.followup.send(response_text)
+    else:
+        await interaction.response.send_message(response_text)
+
+
 @bot.tree.command(name="shutdown", description="Shutdown the bot (Bot owner only).")
 async def shutdown(interaction: discord.Interaction):
     app_info = await bot.application_info()
@@ -209,6 +262,7 @@ async def shutdown(interaction: discord.Interaction):
     await bot.close()
     sys.exit(0)
 
+
 MODEL_CHOICES = [
     app_commands.Choice(name="Gemini 3.1 Flash Lite (Fast, ratelimited)", value="gemini-3.1-flash-lite"),
     app_commands.Choice(name="Gemini 3.5 Flash Lite (Lightweight)", value="gemini-3.5-flash-lite"),
@@ -216,7 +270,39 @@ MODEL_CHOICES = [
     app_commands.Choice(name="Gemini 3.5 Flash", value="gemini-3.5-flash"),
     app_commands.Choice(name="MiniMax M2.7 (free)", value="minimax/minimax-m2.7:free"),
     app_commands.Choice(name="MiniMax M3 (free)", value="minimax/minimax-m3:free"),
+    app_commands.Choice(name="Google: Gemma 4 26B A4B (free)", value="google/gemma-4-26b-a4b-it:free"),
+    app_commands.Choice(name="Google: Gemma 4 31B (free)", value="google/gemma-4-31b-it:free"),
+    app_commands.Choice(name="NVIDIA: Nemotron 3 Ultra (free)", value="nvidia/nemotron-3-ultra-550b-a55b:free"),
+    app_commands.Choice(name="NVIDIA: Nemotron 3.5 Lightning (free)", value="nvidia/nemotron-3.5-lightning:free"),
 ]
+
+
+@bot.tree.command(name="remove_user_character", description="Remove custom user characters from this server's episode pool.")
+@app_commands.describe(user="Select a specific user character to remove (leave blank to clear all user characters in this server)")
+async def remove_user_character(interaction: discord.Interaction, user: discord.Member = None):
+    if not interaction.guild:
+        await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+        return
+
+    guild_id = interaction.guild.id
+    server_chars = GUILD_USER_CHARACTERS.get(guild_id, {})
+
+    if not server_chars:
+        await interaction.response.send_message("No custom user characters registered in this server.", ephemeral=True)
+        return
+
+    if user:
+        target_name = user.display_name
+        if target_name in server_chars:
+            del server_chars[target_name]
+            await interaction.response.send_message(f"Removed character **{target_name}** from this server.")
+        else:
+            await interaction.response.send_message(f"Character **{target_name}** is not in this server's user character list.", ephemeral=True)
+    else:
+        removed_names = list(server_chars.keys())
+        GUILD_USER_CHARACTERS[guild_id].clear()
+        await interaction.response.send_message(f"Cleared **{len(removed_names)}** local user character(s): {', '.join(removed_names)}")
+
 
 @bot.tree.command(name="disable_model", description="Disable a model from being used in /episode (Owner only).")
 @app_commands.describe(
@@ -270,15 +356,34 @@ async def enable_model(
         )
 
 
-@bot.tree.command(name="queue", description="Check the current status of the episode queue.")
+@bot.tree.command(name="queue", description="Check the details of the active and queued episodes.")
 async def show_queue(interaction: discord.Interaction):
-    qsize = bot.episode_queue.qsize()
-    if qsize == 0:
+    if not bot.queue_list:
         await interaction.response.send_message("The episode queue is currently empty!")
-    else:
-        await interaction.response.send_message(
-            f"There are currently **{qsize}** episode(s) waiting in queue."
+        return
+
+    embed = discord.Embed(
+        title="🎬 Episode Generation Queue",
+        color=discord.Color.blurple()
+    )
+
+    for idx, item in enumerate(bot.queue_list):
+        status_str = f"⚡ **{item['status']}**" if item['status'] == "Generating" else f"⏳ **Position #{idx}**"
+        
+        field_value = (
+            f"**Requested by:** {item['user']}\n"
+            f"**Model:** `{item['model']}`\n"
+            f"**Turns:** {item['turns']} | **TTS:** {item['tts']}\n"
+            f"**Status:** {status_str}"
         )
+        embed.add_field(
+            name=f"{idx + 1}. Topic: {item['topic']}",
+            value=field_value,
+            inline=False
+        )
+
+    embed.set_footer(text=f"Total items in process/queue: {len(bot.queue_list)}")
+    await interaction.response.send_message(embed=embed)
 
 
 async def run_episode_job(
@@ -287,19 +392,26 @@ async def run_episode_job(
     turns: int,
     chosen_model: str,
     tts_engine: str,
+    include_user_chars: bool,
+    guild_id: int,
 ):
     await interaction.edit_original_response(content="Generating episode script... [10%]")
+
+    active_characters = DEFAULT_CHARACTERS.copy()
+    if include_user_chars and guild_id and guild_id in GUILD_USER_CHARACTERS:
+        active_characters.update(GUILD_USER_CHARACTERS[guild_id])
+
+    available_chars = ", ".join(active_characters.keys())
+    format_example = "\n".join([f"{name}: [dialogue]" for name in list(active_characters.keys())[:3]])
 
     script_prompt = f"""
     Write a short parody episode script.
     Topic: {topic}
     
-    Characters available: Fred, Kevin, Angry Fred
-    Strict limit: Exactly {turns} total dialogue turns. Ensure every character speaks at least once.
+    Characters available: {available_chars}
+    Strict limit: Exactly {turns} total dialogue turns. Ensure every available character speaks at least once.
     Format strictly as (DO NOT put brackets around character names):
-    Fred: [dialogue]
-    Kevin: [dialogue]
-    Angry Fred: [dialogue]
+    {format_example}
     """
 
     try:
@@ -323,7 +435,7 @@ async def run_episode_job(
 
     header_embed = discord.Embed(
         title=f"{EPISODE_EMOJI} EPISODE: {topic.upper()}",
-        description=f"*A {turns}-turn parody scene starring Fred, Kevin, and Angry Fred.*",
+        description=f"*A {turns}-turn parody scene starring {available_chars}.*",
         color=discord.Color.dark_embed(),
     )
     embeds.append(header_embed)
@@ -338,7 +450,7 @@ async def run_episode_job(
             speaker_key = re.sub(r"[\[\]]", "", match.group(1)).strip()
             dialogue = match.group(2).strip()
 
-            char_data = CHARACTERS.get(
+            char_data = active_characters.get(
                 speaker_key,
                 {
                     "name": speaker_key,
@@ -371,7 +483,7 @@ async def run_episode_job(
                         audio_stream = await generate_fish_audio_tts(
                             dialogue, ref_id
                         )
-                    else:  # edge_tts
+                    else:
                         speaker_voice = char_data.get(
                             "voice", "en-GB-ThomasNeural"
                         )
@@ -411,6 +523,7 @@ async def run_episode_job(
     turns="Number of dialogue turns (3 to 10)",
     model="Choose AI Model provider and version",
     tts="Select Text-to-Speech Provider",
+    include_user_chars="Include added local user characters in the script (Default: False)"
 )
 @app_commands.choices(
     model=MODEL_CHOICES,
@@ -426,9 +539,11 @@ async def episode(
     turns: app_commands.Range[int, 3, 10] = 6,
     model: app_commands.Choice[str] = None,
     tts: app_commands.Choice[str] = None,
+    include_user_chars: bool = False,
 ):
     chosen_model = model.value if model else "gemini-3.5-flash-lite"
     tts_engine = tts.value if tts else "none"
+    guild_id = interaction.guild.id if interaction.guild else None
 
     if chosen_model in DISABLED_MODELS:
         reason = DISABLED_MODELS[chosen_model]
@@ -448,6 +563,8 @@ async def episode(
         chosen_model.startswith("meta-llama")
         or chosen_model.startswith("openrouter")
         or chosen_model.startswith("minimax")
+        or chosen_model.startswith("google/")
+        or chosen_model.startswith("nvidia/")
     ) and not OPENROUTER_API_KEY:
         await interaction.response.send_message(
             "OpenRouter API key is missing in environment variables.", ephemeral=True
@@ -471,9 +588,19 @@ async def episode(
         await interaction.edit_original_response(content="Starting episode generation...")
 
     async def job(inter):
-        await run_episode_job(inter, topic, turns, chosen_model, tts_engine)
+        await run_episode_job(inter, topic, turns, chosen_model, tts_engine, include_user_chars, guild_id)
 
-    await bot.episode_queue.put((job, interaction))
+    task_metadata = {
+        "topic": topic,
+        "user": interaction.user.display_name,
+        "model": chosen_model,
+        "turns": turns,
+        "tts": tts_engine,
+        "status": "Queued",
+    }
+    bot.queue_list.append(task_metadata)
+
+    await bot.episode_queue.put((job, interaction, task_metadata))
 
 
 @bot.tree.command(
@@ -602,7 +729,7 @@ async def version2(interaction: discord.Interaction):
 async def help_command(interaction: discord.Interaction):
     help_text = (
         "**/episode [topic] [turns] [model] [tts]** - Generate an AI parody script (Queued)\n"
-        "**/queue** - Check position/length of the episode generation queue\n"
+        "**/queue** - Check details of active/queued episode requests\n"
         "**/previewtext [image]** - Add preview text overlay to an image\n"
         "**/version** - Check bot version\n"
         "**/version2** - About version 2"
