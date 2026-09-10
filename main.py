@@ -50,10 +50,11 @@ DEFAULT_CHARACTERS = {
 CHARACTERS = DEFAULT_CHARACTERS.copy()
 GUILD_USER_CHARACTERS = {}
 
+# put fish audio voices
 FISH_AUDIO_VOICES = {
-    "Fred": "fish audio voice",
-    "Kevin": "fish audio voice",
-    "Angry Fred": "fish audio voice",
+    "Fred": "test",
+    "Kevin": "test2",
+    "Angry Fred": "test3",
 }
 
 
@@ -133,7 +134,7 @@ async def generate_fish_audio_tts(text: str, reference_id: str) -> io.BytesIO:
                 return audio_data
             else:
                 err_text = await resp.text()
-                raise Exception(f"OpenRouter TTS Error ({resp.status}): {err_text}")
+                raise Exception(f"<:emoji_name:emoji_id> OpenRouter TTS Error ({resp.status}): {err_text}")
 
 
 async def request_openrouter_script(prompt: str, model_id: str) -> str:
@@ -185,7 +186,7 @@ async def request_openrouter_script(prompt: str, model_id: str) -> str:
                     return data["choices"][0]["message"]["content"].strip()
                 else:
                     err_body = await resp.text()
-                    raise Exception(f"OpenRouter LLM Error ({resp.status}): {err_body}")
+                    raise Exception(f"<:emoji_name:emoji_id> OpenRouter LLM Error ({resp.status}): {err_body}")
 
 
 @bot.tree.command(name="restart", description="Restart the bot (Bot owner only).")
@@ -267,13 +268,16 @@ MODEL_CHOICES = [
     app_commands.Choice(name="Gemini 3.1 Flash Lite (Fast, ratelimited)", value="gemini-3.1-flash-lite"),
     app_commands.Choice(name="Gemini 3.5 Flash Lite (Lightweight)", value="gemini-3.5-flash-lite"),
     app_commands.Choice(name="Gemini 3.7 Flash", value="gemini-3.7-flash"),
+    app_commands.Choice(name="Gemini 3.8 Flash (NEW)", value="gemini-3.8-flash"),
     app_commands.Choice(name="Gemini 3.5 Flash", value="gemini-3.5-flash"),
-    app_commands.Choice(name="MiniMax M2.7 (free)", value="minimax/minimax-m2.7:free"),
-    app_commands.Choice(name="MiniMax M3 (free)", value="minimax/minimax-m3:free"),
-    app_commands.Choice(name="Google: Gemma 4 26B A4B (free)", value="google/gemma-4-26b-a4b-it:free"),
-    app_commands.Choice(name="Google: Gemma 4 31B (free)", value="google/gemma-4-31b-it:free"),
+    app_commands.Choice(name="MiniMax M2.7", value="minimax/minimax-m2.7"),
+    app_commands.Choice(name="MiniMax M3", value="minimax/minimax-m3"),
+    app_commands.Choice(name="NVIDIA: Nemotron 3 Super (free)", value="nvidia/nemotron-3-super-120b-a12b:free"),
+    app_commands.Choice(name="NVIDIA: Nemotron 3 Nano Omni (free)", value="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"),
     app_commands.Choice(name="NVIDIA: Nemotron 3 Ultra (free)", value="nvidia/nemotron-3-ultra-550b-a55b:free"),
     app_commands.Choice(name="NVIDIA: Nemotron 3.5 Lightning (free)", value="nvidia/nemotron-3.5-lightning:free"),
+    app_commands.Choice(name="inclusionAI: Ling 3.0 Flash Sante (free)", value="inclusionai/ling-3.0-flash-sante:free"),
+    app_commands.Choice(name="inclusionAI: Ling 3.0 Flash Fin (free)", value="inclusionai/ling-3.0-flash-fin:free"),
 ]
 
 
@@ -385,6 +389,31 @@ async def show_queue(interaction: discord.Interaction):
     embed.set_footer(text=f"Total items in process/queue: {len(bot.queue_list)}")
     await interaction.response.send_message(embed=embed)
 
+@bot.tree.command(name="status_models", description="Check the status (Enabled/Disabled) of all supported AI models.")
+async def status_models(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="Model Status Overview",
+        color=discord.Color.blue()
+    )
+
+    for choice in MODEL_CHOICES:
+        model_id = choice.value
+        model_name = choice.name
+
+        if model_id in DISABLED_MODELS:
+            reason = DISABLED_MODELS[model_id]
+            status_text = f"🔴 **Disabled**\n**Reason:** {reason}"
+        else:
+            status_text = "🟢 **Enabled**"
+
+        embed.add_field(
+            name=model_name,
+            value=f"`{model_id}`\n{status_text}",
+            inline=False
+        )
+
+    await interaction.response.send_message(embed=embed)
+
 
 async def run_episode_job(
     interaction: discord.Interaction,
@@ -421,11 +450,11 @@ async def run_episode_job(
         raw_script = await request_openrouter_script(script_prompt, chosen_model)
 
         if not raw_script:
-            await interaction.followup.send("Content blocked or empty response.")
+            await interaction.followup.send("<:emoji_name:emoji_id> Content blocked or empty response.")
             return
 
     except Exception as e:
-        await interaction.followup.send(f"Failed to generate script ({chosen_model}): {e}")
+        await interaction.followup.send(f"<:emoji_name:emoji_id> Failed to generate script ({chosen_model}): {e}")
         return
 
     await interaction.edit_original_response(content="Formatting script embeds... [60%]")
@@ -435,7 +464,12 @@ async def run_episode_job(
 
     header_embed = discord.Embed(
         title=f"{EPISODE_EMOJI} EPISODE: {topic.upper()}",
-        description=f"*A {turns}-turn parody scene starring {available_chars}.*",
+        description=(
+            f"*A {turns}-turn parody scene starring {available_chars}.*\n\n"
+            f"🤖 **Model:** `{chosen_model}`\n"
+            f"💬 **Turns:** {turns}\n"
+            f"🔊 **TTS Engine:** `{tts_engine}`"
+        ),
         color=discord.Color.dark_embed(),
     )
     embeds.append(header_embed)
@@ -478,7 +512,7 @@ async def run_episode_job(
                 try:
                     if tts_engine == "fish_audio":
                         ref_id = FISH_AUDIO_VOICES.get(
-                            speaker_key, "11b604a2d4a74323872c29c25ff62be3"
+                            speaker_key, "test4"
                         )
                         audio_stream = await generate_fish_audio_tts(
                             dialogue, ref_id
@@ -498,7 +532,7 @@ async def run_episode_job(
                         )
                     )
                 except Exception as tts_err:
-                    print(f"TTS generation failed for line {line_count}: {tts_err}")
+                    print(f"<:emoji_name:emoji_id> TTS generation failed for line {line_count}: {tts_err}")
 
     if len(embeds) > 10:
         embeds = embeds[:10]
@@ -579,6 +613,16 @@ async def episode(
 
     await interaction.response.defer()
 
+    app_info = await bot.application_info()
+    is_owner = interaction.user.id == app_info.owner.id
+
+    if is_owner:
+        await interaction.edit_original_response(content="[Owner Bypass] Starting episode generation immediately...")
+        asyncio.create_task(
+            run_episode_job(interaction, topic, turns, chosen_model, tts_engine, include_user_chars, guild_id)
+        )
+        return
+
     queue_position = bot.episode_queue.qsize() + 1
     if queue_position > 1:
         await interaction.edit_original_response(
@@ -601,7 +645,6 @@ async def episode(
     bot.queue_list.append(task_metadata)
 
     await bot.episode_queue.put((job, interaction, task_metadata))
-
 
 @bot.tree.command(
     name="previewtext",
