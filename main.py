@@ -50,11 +50,10 @@ DEFAULT_CHARACTERS = {
 CHARACTERS = DEFAULT_CHARACTERS.copy()
 GUILD_USER_CHARACTERS = {}
 
-# put fish audio voices
 FISH_AUDIO_VOICES = {
-    "Fred": "test",
-    "Kevin": "test2",
-    "Angry Fred": "test3",
+    "Fred": "32208204a35345d49177a91121928b6c",
+    "Kevin": "d9688399ca654cb8a0bc8a5f87b4eca8",
+    "Angry Fred": "2917825b4cbe4eb185c680f60651e5ce",
 }
 
 
@@ -269,15 +268,10 @@ MODEL_CHOICES = [
     app_commands.Choice(name="Gemini 3.5 Flash Lite (Lightweight)", value="gemini-3.5-flash-lite"),
     app_commands.Choice(name="Gemini 3.7 Flash", value="gemini-3.7-flash"),
     app_commands.Choice(name="Gemini 3.8 Flash (NEW)", value="gemini-3.8-flash"),
-    app_commands.Choice(name="Gemini 3.5 Flash", value="gemini-3.5-flash"),
-    app_commands.Choice(name="MiniMax M2.7", value="minimax/minimax-m2.7"),
-    app_commands.Choice(name="MiniMax M3", value="minimax/minimax-m3"),
+    app_commands.Choice(name="Nex-N2.5-Mini (free)", value="nex-agi/nex-n2.5-mini:free"),
     app_commands.Choice(name="NVIDIA: Nemotron 3 Super (free)", value="nvidia/nemotron-3-super-120b-a12b:free"),
-    app_commands.Choice(name="NVIDIA: Nemotron 3 Nano Omni (free)", value="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"),
-    app_commands.Choice(name="NVIDIA: Nemotron 3 Ultra (free)", value="nvidia/nemotron-3-ultra-550b-a55b:free"),
     app_commands.Choice(name="NVIDIA: Nemotron 3.5 Lightning (free)", value="nvidia/nemotron-3.5-lightning:free"),
     app_commands.Choice(name="inclusionAI: Ling 3.0 Flash Sante (free)", value="inclusionai/ling-3.0-flash-sante:free"),
-    app_commands.Choice(name="inclusionAI: Ling 3.0 Flash Fin (free)", value="inclusionai/ling-3.0-flash-fin:free"),
 ]
 
 
@@ -512,7 +506,7 @@ async def run_episode_job(
                 try:
                     if tts_engine == "fish_audio":
                         ref_id = FISH_AUDIO_VOICES.get(
-                            speaker_key, "test4"
+                            speaker_key, "11b604a2d4a74323872c29c25ff62be3"
                         )
                         audio_stream = await generate_fish_audio_tts(
                             dialogue, ref_id
