@@ -270,7 +270,7 @@ MODEL_CHOICES = [
     app_commands.Choice(name="Gemini 3.8 Flash (NEW)", value="gemini-3.8-flash"),
     app_commands.Choice(name="Nex-N2.5-Mini (free)", value="nex-agi/nex-n2.5-mini:free"),
     app_commands.Choice(name="NVIDIA: Nemotron 3 Super (free)", value="nvidia/nemotron-3-super-120b-a12b:free"),
-    app_commands.Choice(name="NVIDIA: Nemotron 3.5 Lightning (free)", value="nvidia/nemotron-3.5-lightning:free"),
+    app_commands.Choice(name="Nex AGI: Nex-N2.5-Pro (free)", value="nex-agi/nex-n2.5-pro:free"),
     app_commands.Choice(name="inclusionAI: Ling 3.0 Flash Sante (free)", value="inclusionai/ling-3.0-flash-sante:free"),
 ]
 
@@ -352,7 +352,6 @@ async def enable_model(
             f"Model `{model.name}` is not currently disabled.",
             ephemeral=True
         )
-
 
 @bot.tree.command(name="queue", description="Check the details of the active and queued episodes.")
 async def show_queue(interaction: discord.Interaction):
@@ -569,6 +568,13 @@ async def episode(
     tts: app_commands.Choice[str] = None,
     include_user_chars: bool = False,
 ):
+    if len(topic) > 256:
+        await interaction.response.send_message(
+            "Your prompt exceeds Discord's 256 character limit. Please shorten your input and try again.",
+            ephemeral=True,
+        )
+        return
+
     chosen_model = model.value if model else "gemini-3.5-flash-lite"
     tts_engine = tts.value if tts else "none"
     guild_id = interaction.guild.id if interaction.guild else None
@@ -611,7 +617,7 @@ async def episode(
     is_owner = interaction.user.id == app_info.owner.id
 
     if is_owner:
-        await interaction.edit_original_response(content="[Owner Bypass] Starting episode generation immediately...")
+        await interaction.edit_original_response(content="Starting episode generation immediately...")
         asyncio.create_task(
             run_episode_job(interaction, topic, turns, chosen_model, tts_engine, include_user_chars, guild_id)
         )
