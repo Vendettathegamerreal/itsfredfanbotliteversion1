@@ -50,8 +50,9 @@ DEFAULT_CHARACTERS = {
 CHARACTERS = DEFAULT_CHARACTERS.copy()
 GUILD_USER_CHARACTERS = {}
 
+#fish audio voices characters
 FISH_AUDIO_VOICES = {
-    "Fred": "32208204a35345d49177a91121928b6c",
+    "Fred": "32208204a35345d49177a91121928b6c", 
     "Kevin": "d9688399ca654cb8a0bc8a5f87b4eca8",
     "Angry Fred": "2917825b4cbe4eb185c680f60651e5ce",
 }
