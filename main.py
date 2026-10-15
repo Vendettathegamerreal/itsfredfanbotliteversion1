@@ -1,5 +1,6 @@
 import asyncio
 import io
+import json
 import os
 import re
 import sys
@@ -12,6 +13,7 @@ from google.genai import types
 from PIL import Image, ImageSequence
 import edge_tts
 import aiohttp
+import random
 
 load_dotenv()
 
@@ -23,8 +25,32 @@ gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 EPISODE_EMOJI = "<:emoji_name:emoji_id>"
 OVERLAY_FILENAME = "overlay.png"
+DATA_FILE = "bot_data.json"
 
 DISABLED_MODELS = {}
+
+# Load persistent JSON data for admins
+def load_data():
+    if os.path.exists(DATA_FILE):
+        try:
+            with open(DATA_FILE, "r") as f:
+                data = json.load(f)
+                return set(data.get("admins", []))
+        except Exception as e:
+            print(f"Error loading {DATA_FILE}: {e}")
+    return set()
+
+def save_data():
+    data = {
+        "admins": list(ADMIN_IDS)
+    }
+    try:
+        with open(DATA_FILE, "w") as f:
+            json.dump(data, f, indent=4)
+    except Exception as e:
+        print(f"Error saving {DATA_FILE}: {e}")
+
+ADMIN_IDS = load_data()
 
 DEFAULT_CHARACTERS = {
     "Fred": {
@@ -39,22 +65,15 @@ DEFAULT_CHARACTERS = {
         "color": discord.Color.blue(),
         "voice": "en-US-AndrewNeural",
     },
-    "Angry Fred": {
-        "name": "Angry Fred",
-        "avatar": "https://iili.io/CtW9xWX.jpg",
-        "color": discord.Color.red(),
-        "voice": "en-US-ChristopherNeural",
-    },
 }
 
 CHARACTERS = DEFAULT_CHARACTERS.copy()
 GUILD_USER_CHARACTERS = {}
 
-#fish audio voices characters
+#you can put fish audio voices
 FISH_AUDIO_VOICES = {
-    "Fred": "32208204a35345d49177a91121928b6c", 
+    "Fred": "32208204a35345d49177a91121928b6c",
     "Kevin": "d9688399ca654cb8a0bc8a5f87b4eca8",
-    "Angry Fred": "2917825b4cbe4eb185c680f60651e5ce",
 }
 
 
@@ -64,7 +83,7 @@ class ParodyBot(commands.Bot):
         intents.message_content = True
         super().__init__(command_prefix="!", intents=intents)
         self.episode_queue = asyncio.Queue()
-        self.queue_list = []  # List tracking metadata for active/queued items
+        self.queue_list = []
         self.worker_task = None
 
     async def setup_hook(self):
@@ -72,18 +91,17 @@ class ParodyBot(commands.Bot):
         print("Slash commands synced successfully.")
         self.worker_task = asyncio.create_task(self.episode_queue_worker())
 
-    async def episode_queue_worker(self):
-        """Processes episode creation requests sequentially in the background."""
+async def episode_queue_worker(self):
         while True:
             task_func, interaction, metadata = await self.episode_queue.get()
             try:
                 metadata["status"] = "Generating"
                 await task_func(interaction)
             except Exception as e:
-                print(f"Error processing episode task: {e}")
+                print(f"Error processing task: {e}")
                 try:
                     await interaction.followup.send(
-                        f"An error occurred during episode processing: {e}"
+                        f"An error occurred during processing: {e}"
                     )
                 except Exception:
                     pass
@@ -94,6 +112,15 @@ class ParodyBot(commands.Bot):
 
 
 bot = ParodyBot()
+
+
+async def is_owner_or_admin(interaction: discord.Interaction) -> bool:
+    app_info = await bot.application_info()
+    if interaction.user.id == app_info.owner.id:
+        return True
+    if interaction.user.id in ADMIN_IDS:
+        return True
+    return False
 
 
 @bot.event
@@ -157,16 +184,33 @@ async def request_openrouter_script(prompt: str, model_id: str) -> str:
                 threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
             ),
         ]
-        response = await asyncio.to_thread(
-            gemini_client.models.generate_content,
-            model=model_id,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                safety_settings=safety_settings,
-                temperature=0.7,
-            ),
-        )
-        return response.text.strip() if response.text else ""
+        
+        # Exponential backoff retry handler for Gemini Rate Limits (429 / Resource Exhausted)
+        max_retries = 5
+        base_delay = 2.0
+        
+        for attempt in range(max_retries):
+            try:
+                response = await asyncio.to_thread(
+                    gemini_client.models.generate_content,
+                    model=model_id,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        safety_settings=safety_settings,
+                        temperature=0.7,
+                    ),
+                )
+                return response.text.strip() if response.text else ""
+            except Exception as e:
+                err_str = str(e)
+                if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "rate limit" in err_str.lower():
+                    if attempt < max_retries - 1:
+                        delay = (base_delay ** attempt) + random.uniform(0.5, 2.0)
+                        print(f"Gemini rate limited (429). Retrying in {delay:.2f}s (Attempt {attempt + 1}/{max_retries})...")
+                        await asyncio.sleep(delay)
+                        continue
+                raise e
+        return ""
 
     else:
         url = "https://openrouter.ai/api/v1/chat/completions"
@@ -189,18 +233,39 @@ async def request_openrouter_script(prompt: str, model_id: str) -> str:
                     raise Exception(f"<:emoji_name:emoji_id> OpenRouter LLM Error ({resp.status}): {err_body}")
 
 
-@bot.tree.command(name="restart", description="Restart the bot (Bot owner only).")
-async def restart(interaction: discord.Interaction):
+@bot.tree.command(name="ping", description="Check if the bot is online and measure latency.")
+async def ping(interaction: discord.Interaction):
+    latency = round(bot.latency * 1000)
+    await interaction.response.send_message(f"🏓 Pong! Latency: `{latency}ms`")
+
+
+@bot.tree.command(name="add_admin", description="Add a bot administrator (Owner only).")
+@app_commands.describe(user="The user to grant admin privileges")
+async def add_admin(interaction: discord.Interaction, user: discord.Member):
     app_info = await bot.application_info()
     if interaction.user.id != app_info.owner.id:
-        await interaction.response.send_message(
-            "Only the bot owner can use this command.", ephemeral=True
-        )
+        await interaction.response.send_message("Only the bot owner can add admins.", ephemeral=True)
         return
 
-    await interaction.response.send_message("Restarting bot...", ephemeral=True)
-    await bot.close()
-    os.execv(sys.executable, [sys.executable] + sys.argv)
+    ADMIN_IDS.add(user.id)
+    save_data()
+    await interaction.response.send_message(f"✅ Successfully added **{user.display_name}** as a bot administrator.")
+
+
+@bot.tree.command(name="remove_admin", description="Remove a bot administrator (Owner only).")
+@app_commands.describe(user="The user to remove admin privileges from")
+async def remove_admin(interaction: discord.Interaction, user: discord.Member):
+    app_info = await bot.application_info()
+    if interaction.user.id != app_info.owner.id:
+        await interaction.response.send_message("Only the bot owner can remove admins.", ephemeral=True)
+        return
+
+    if user.id in ADMIN_IDS:
+        ADMIN_IDS.remove(user.id)
+        save_data()
+        await interaction.response.send_message(f"✅ Successfully removed **{user.display_name}** from bot administrators.")
+    else:
+        await interaction.response.send_message(f"User **{user.display_name}** is not in the admin list.", ephemeral=True)
 
 
 @bot.tree.command(name="add_user_character", description="Add server users in the channel as characters for this server's episodes.")
@@ -265,13 +330,13 @@ async def shutdown(interaction: discord.Interaction):
 
 
 MODEL_CHOICES = [
-    app_commands.Choice(name="Gemini 3.1 Flash Lite (Fast, ratelimited)", value="gemini-3.1-flash-lite"),
-    app_commands.Choice(name="Gemini 3.5 Flash Lite (Lightweight)", value="gemini-3.5-flash-lite"),
-    app_commands.Choice(name="Gemini 3.7 Flash", value="gemini-3.7-flash"),
-    app_commands.Choice(name="Gemini 3.8 Flash (NEW)", value="gemini-3.8-flash"),
-    app_commands.Choice(name="Nex-N2.5-Mini (free)", value="nex-agi/nex-n2.5-mini:free"),
+    app_commands.Choice(name="Gemini 3.1 Flash Lite", value="gemini-3.1-flash-lite"),
+    app_commands.Choice(name="Gemini 3.5 Flash Lite", value="gemini-3.5-flash-lite"),
+    app_commands.Choice(name="Gemini 3.8 Flash (ratelimited)", value="gemini-3.8-flash"),
+    app_commands.Choice(name="Dots Studio: Dots3-Note Preview (free)", value="dots-studio/dots-3-note-preview:free"),
+    app_commands.Choice(name="Gemini 3.5 Flash", value="gemini-3.5-flash"),
     app_commands.Choice(name="NVIDIA: Nemotron 3 Super (free)", value="nvidia/nemotron-3-super-120b-a12b:free"),
-    app_commands.Choice(name="Nex AGI: Nex-N2.5-Pro (free)", value="nex-agi/nex-n2.5-pro:free"),
+    app_commands.Choice(name="Respan: Span-01 Lite (free)", value="respan/span-01-lite:free"),
     app_commands.Choice(name="inclusionAI: Ling 3.0 Flash Sante (free)", value="inclusionai/ling-3.0-flash-sante:free"),
 ]
 
@@ -303,7 +368,7 @@ async def remove_user_character(interaction: discord.Interaction, user: discord.
         await interaction.response.send_message(f"Cleared **{len(removed_names)}** local user character(s): {', '.join(removed_names)}")
 
 
-@bot.tree.command(name="disable_model", description="Disable a model from being used in /episode (Owner only).")
+@bot.tree.command(name="disable_model", description="Disable a model from being used in commands (Owner & Admins only).")
 @app_commands.describe(
     model="Select the model to disable",
     reason="The reason for disabling this model"
@@ -314,10 +379,9 @@ async def disable_model(
     model: app_commands.Choice[str],
     reason: str = "Maintenance / Temporarily disabled."
 ):
-    app_info = await bot.application_info()
-    if interaction.user.id != app_info.owner.id:
+    if not await is_owner_or_admin(interaction):
         await interaction.response.send_message(
-            "Only the bot owner can use this command.", ephemeral=True
+            "Only the bot owner and admins can use this command.", ephemeral=True
         )
         return
 
@@ -328,17 +392,16 @@ async def disable_model(
     )
 
 
-@bot.tree.command(name="enable_model", description="Re-enable a disabled model (Owner only).")
+@bot.tree.command(name="enable_model", description="Re-enable a disabled model (Owner & Admins only).")
 @app_commands.describe(model="Select the model to enable")
 @app_commands.choices(model=MODEL_CHOICES)
 async def enable_model(
     interaction: discord.Interaction,
     model: app_commands.Choice[str]
 ):
-    app_info = await bot.application_info()
-    if interaction.user.id != app_info.owner.id:
+    if not await is_owner_or_admin(interaction):
         await interaction.response.send_message(
-            "Only the bot owner can use this command.", ephemeral=True
+            "Only the bot owner and admins can use this command.", ephemeral=True
         )
         return
 
@@ -354,14 +417,14 @@ async def enable_model(
             ephemeral=True
         )
 
-@bot.tree.command(name="queue", description="Check the details of the active and queued episodes.")
+@bot.tree.command(name="queue", description="Check the details of active and queued tasks.")
 async def show_queue(interaction: discord.Interaction):
     if not bot.queue_list:
-        await interaction.response.send_message("The episode queue is currently empty!")
+        await interaction.response.send_message("The request queue is currently empty!")
         return
 
     embed = discord.Embed(
-        title="🎬 Episode Generation Queue",
+        title="🎬 Processing Queue",
         color=discord.Color.blurple()
     )
 
@@ -370,12 +433,11 @@ async def show_queue(interaction: discord.Interaction):
         
         field_value = (
             f"**Requested by:** {item['user']}\n"
-            f"**Model:** `{item['model']}`\n"
-            f"**Turns:** {item['turns']} | **TTS:** {item['tts']}\n"
+            f"**Type:** `{item.get('type', 'Episode')}` | **Model:** `{item['model']}`\n"
             f"**Status:** {status_str}"
         )
         embed.add_field(
-            name=f"{idx + 1}. Topic: {item['topic']}",
+            name=f"{idx + 1}. Prompt/Topic: {item['topic']}",
             value=field_value,
             inline=False
         )
@@ -478,6 +540,10 @@ async def run_episode_job(
             speaker_key = re.sub(r"[\[\]]", "", match.group(1)).strip()
             dialogue = match.group(2).strip()
 
+            words = dialogue.split()
+            if len(words) > 256:
+                dialogue = " ".join(words[:256]) + "..."
+
             char_data = active_characters.get(
                 speaker_key,
                 {
@@ -543,6 +609,166 @@ async def run_episode_job(
         await interaction.followup.send(embeds=embeds)
 
     await interaction.edit_original_response(content="Episode generation complete!")
+
+@bot.tree.command(name="tts", description="Generate Text-to-Speech audio using a specific character voice.")
+@app_commands.describe(
+    text="The text you want to convert into speech",
+    character="Choose a preset character voice",
+    engine="Select TTS Engine provider"
+)
+@app_commands.choices(
+    character=[
+        app_commands.Choice(name="Fred (Fred Figglehorn)", value="Fred"),
+        app_commands.Choice(name="Kevin", value="Kevin"),
+    ],
+    engine=[
+        app_commands.Choice(name="Edge-TTS (Free)", value="edge_tts"),
+        app_commands.Choice(name="Fish Audio (Custom Voices)", value="fish_audio"),
+    ]
+)
+async def tts_command(
+    interaction: discord.Interaction,
+    text: str,
+    character: app_commands.Choice[str],
+    engine: app_commands.Choice[str] = None
+):
+    if len(text) > 300:
+        await interaction.response.send_message("Text cannot exceed 300 characters.", ephemeral=True)
+        return
+
+    chosen_engine = engine.value if engine else "edge_tts"
+    char_key = character.value
+    char_data = DEFAULT_CHARACTERS.get(char_key, DEFAULT_CHARACTERS["Fred"])
+
+    if chosen_engine == "fish_audio" and not OPENROUTER_API_KEY:
+        await interaction.response.send_message("OpenRouter API key is missing for Fish Audio TTS.", ephemeral=True)
+        return
+
+    await interaction.response.defer()
+
+    try:
+        if chosen_engine == "fish_audio":
+            ref_id = FISH_AUDIO_VOICES.get(char_key, "32208204a35345d49177a91121928b6c")
+            audio_stream = await generate_fish_audio_tts(text, ref_id)
+        else:
+            voice_name = char_data.get("voice", "en-GB-ThomasNeural")
+            audio_stream = await generate_tts_audio(text, voice_name)
+
+        file = discord.File(audio_stream, filename=f"tts_{char_key.lower().replace(' ', '_')}.mp3")
+        
+        embed = discord.Embed(
+            title=f"🗣️ TTS Audio: {char_data['name']}",
+            description=f'"{text}"',
+            color=char_data.get("color", discord.Color.blue())
+        )
+        embed.set_thumbnail(url=char_data.get("avatar"))
+        embed.set_footer(text=f"Engine: {chosen_engine}")
+
+        await interaction.followup.send(embed=embed, file=file)
+    except Exception as e:
+        await interaction.followup.send(f"Failed to generate TTS audio: {e}")
+
+
+async def run_ask_job(
+    interaction: discord.Interaction,
+    prompt: str,
+    chosen_model: str,
+):
+    await interaction.edit_original_response(content=f"Processing question via {chosen_model}... [30%]")
+
+    try:
+        raw_response = await request_openrouter_script(prompt, chosen_model)
+        if not raw_response:
+            await interaction.followup.send("<:emoji_name:emoji_id> Empty response or blocked prompt.")
+            return
+    except Exception as e:
+        await interaction.followup.send(f"<:emoji_name:emoji_id> Failed to answer prompt ({chosen_model}): {e}")
+        return
+
+    words = raw_response.split()
+    if len(words) > 256:
+        trimmed_response = " ".join(words[:256]) + "..."
+    else:
+        trimmed_response = raw_response
+
+    embed = discord.Embed(
+        title="❓ Answer",
+        description=trimmed_response,
+        color=discord.Color.green()
+    )
+    embed.add_field(name="Model", value=f"`{chosen_model}`", inline=True)
+    embed.add_field(name="Prompt", value=prompt[:256], inline=False)
+
+    await interaction.followup.send(embed=embed)
+    await interaction.edit_original_response(content="Response generated!")
+
+
+@bot.tree.command(name="ask", description="Ask the AI a question directly without episode or characters.")
+@app_commands.describe(
+    prompt="Your question or request",
+    model="Choose AI Model provider and version"
+)
+@app_commands.choices(model=MODEL_CHOICES)
+async def ask(
+    interaction: discord.Interaction,
+    prompt: str,
+    model: app_commands.Choice[str] = None
+):
+    if len(prompt) > 256:
+        await interaction.response.send_message(
+            "Your prompt exceeds 256 characters. Please shorten it and try again.",
+            ephemeral=True
+        )
+        return
+
+    chosen_model = model.value if model else "gemini-3.5-flash-lite"
+
+    if chosen_model in DISABLED_MODELS:
+        reason = DISABLED_MODELS[chosen_model]
+        await interaction.response.send_message(
+            f"The selected model (`{chosen_model}`) is currently disabled.\n**Reason:** {reason}",
+            ephemeral=True
+        )
+        return
+
+    if chosen_model.startswith("gemini-") and not gemini_client:
+        await interaction.response.send_message("Gemini API key is missing.", ephemeral=True)
+        return
+
+    if not chosen_model.startswith("gemini-") and not OPENROUTER_API_KEY:
+        await interaction.response.send_message("OpenRouter API key is missing.", ephemeral=True)
+        return
+
+    await interaction.response.defer()
+
+    bypass_queue = await is_owner_or_admin(interaction)
+
+    if bypass_queue:
+        await interaction.edit_original_response(content="Processing question immediately...")
+        asyncio.create_task(run_ask_job(interaction, prompt, chosen_model))
+        return
+
+    queue_position = bot.episode_queue.qsize() + 1
+    if queue_position > 1:
+        await interaction.edit_original_response(
+            content=f"Queued! Position in line: {queue_position - 1}"
+        )
+    else:
+        await interaction.edit_original_response(content="Processing request...")
+
+    async def job(inter):
+        await run_ask_job(inter, prompt, chosen_model)
+
+    task_metadata = {
+        "topic": prompt,
+        "user": interaction.user.display_name,
+        "model": chosen_model,
+        "type": "Ask",
+        "status": "Queued",
+    }
+    bot.queue_list.append(task_metadata)
+
+    await bot.episode_queue.put((job, interaction, task_metadata))
 
 
 @bot.tree.command(name="episode", description="Generate an AI parody episode.")
@@ -614,10 +840,9 @@ async def episode(
 
     await interaction.response.defer()
 
-    app_info = await bot.application_info()
-    is_owner = interaction.user.id == app_info.owner.id
+    bypass_queue = await is_owner_or_admin(interaction)
 
-    if is_owner:
+    if bypass_queue:
         await interaction.edit_original_response(content="Starting episode generation immediately...")
         asyncio.create_task(
             run_episode_job(interaction, topic, turns, chosen_model, tts_engine, include_user_chars, guild_id)
@@ -641,6 +866,7 @@ async def episode(
         "model": chosen_model,
         "turns": turns,
         "tts": tts_engine,
+        "type": "Episode",
         "status": "Queued",
     }
     bot.queue_list.append(task_metadata)
@@ -773,7 +999,9 @@ async def version2(interaction: discord.Interaction):
 async def help_command(interaction: discord.Interaction):
     help_text = (
         "**/episode [topic] [turns] [model] [tts]** - Generate an AI parody script (Queued)\n"
-        "**/queue** - Check details of active/queued episode requests\n"
+        "**/ask [prompt] [model]** - Ask the AI a direct question (Queued)\n"
+        "**/ping** - Check bot online status & latency\n"
+        "**/queue** - Check details of active/queued requests\n"
         "**/previewtext [image]** - Add preview text overlay to an image\n"
         "**/version** - Check bot version\n"
         "**/version2** - About version 2"
