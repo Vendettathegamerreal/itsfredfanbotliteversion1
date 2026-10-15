@@ -91,7 +91,7 @@ class ParodyBot(commands.Bot):
         print("Slash commands synced successfully.")
         self.worker_task = asyncio.create_task(self.episode_queue_worker())
 
-async def episode_queue_worker(self):
+    async def episode_queue_worker(self):
         while True:
             task_func, interaction, metadata = await self.episode_queue.get()
             try:
