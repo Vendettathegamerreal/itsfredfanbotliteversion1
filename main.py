@@ -23,7 +23,7 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
-EPISODE_EMOJI = "<:emoji_name:emoji_id>"
+EPISODE_EMOJI = "EMOJI_NAME and EMOJI_ID"
 OVERLAY_FILENAME = "overlay.png"
 DATA_FILE = "bot_data.json"
 
@@ -61,7 +61,7 @@ DEFAULT_CHARACTERS = {
     },
     "Kevin": {
         "name": "Kevin",
-        "avatar": "https://wertigo.ru/api/shared_files/b7bef8c8-99fe-415f-a1d2-de1f758445eb/files/b7bef8c8-99fe-415f-a1d2-de1f758445eb/preview",
+        "avatar": "https://i.ibb.co/4rqZ9Zy/png-202607290002.jpg",
         "color": discord.Color.blue(),
         "voice": "en-US-AndrewNeural",
     },
@@ -70,7 +70,8 @@ DEFAULT_CHARACTERS = {
 CHARACTERS = DEFAULT_CHARACTERS.copy()
 GUILD_USER_CHARACTERS = {}
 
-#you can put fish audio voices
+# fish audio voices
+
 FISH_AUDIO_VOICES = {
     "Fred": "32208204a35345d49177a91121928b6c",
     "Kevin": "d9688399ca654cb8a0bc8a5f87b4eca8",
@@ -139,7 +140,7 @@ async def generate_tts_audio(text: str, voice: str) -> io.BytesIO:
     audio_data.seek(0)
     return audio_data
 
-
+## request fish audio tts from openrouter
 async def generate_fish_audio_tts(text: str, reference_id: str) -> io.BytesIO:
     url = "https://openrouter.ai/api/v1/audio/speech"
     headers = {
@@ -161,7 +162,7 @@ async def generate_fish_audio_tts(text: str, reference_id: str) -> io.BytesIO:
                 return audio_data
             else:
                 err_text = await resp.text()
-                raise Exception(f"<:emoji_name:emoji_id> OpenRouter TTS Error ({resp.status}): {err_text}")
+                raise Exception(f"OpenRouter TTS Error ({resp.status}): {err_text}")
 
 
 async def request_openrouter_script(prompt: str, model_id: str) -> str:
@@ -230,7 +231,7 @@ async def request_openrouter_script(prompt: str, model_id: str) -> str:
                     return data["choices"][0]["message"]["content"].strip()
                 else:
                     err_body = await resp.text()
-                    raise Exception(f"<:emoji_name:emoji_id> OpenRouter LLM Error ({resp.status}): {err_body}")
+                    raise Exception(f" OpenRouter LLM Error ({resp.status}): {err_body}")
 
 
 @bot.tree.command(name="ping", description="Check if the bot is online and measure latency.")
@@ -336,7 +337,8 @@ MODEL_CHOICES = [
     app_commands.Choice(name="Dots Studio: Dots3-Note Preview (free)", value="dots-studio/dots-3-note-preview:free"),
     app_commands.Choice(name="Gemini 3.5 Flash", value="gemini-3.5-flash"),
     app_commands.Choice(name="NVIDIA: Nemotron 3 Super (free)", value="nvidia/nemotron-3-super-120b-a12b:free"),
-    app_commands.Choice(name="Respan: Span-01 Lite (free)", value="respan/span-01-lite:free"),
+    app_commands.Choice(name="NVIDIA: Nemotron 3 Ultra (free)", value="nvidia/nemotron-3-ultra-550b-a55b:free"),
+    app_commands.Choice(name="NVIDIA: Nemotron 3.5 Lightning", value="nvidia/nemotron-3.5-lightning:free"),
     app_commands.Choice(name="inclusionAI: Ling 3.0 Flash Sante (free)", value="inclusionai/ling-3.0-flash-sante:free"),
 ]
 
@@ -506,11 +508,11 @@ async def run_episode_job(
         raw_script = await request_openrouter_script(script_prompt, chosen_model)
 
         if not raw_script:
-            await interaction.followup.send("<:emoji_name:emoji_id> Content blocked or empty response.")
+            await interaction.followup.send("<EMOJI_NAME and EMOJI_ID> Content blocked or empty response.")
             return
 
     except Exception as e:
-        await interaction.followup.send(f"<:emoji_name:emoji_id> Failed to generate script ({chosen_model}): {e}")
+        await interaction.followup.send(f"<EMOJI_NAME and EMOJI_ID> Failed to generate script ({chosen_model}): {e}")
         return
 
     await interaction.edit_original_response(content="Formatting script embeds... [60%]")
@@ -592,7 +594,7 @@ async def run_episode_job(
                         )
                     )
                 except Exception as tts_err:
-                    print(f"<:emoji_name:emoji_id> TTS generation failed for line {line_count}: {tts_err}")
+                    print(f"TTS generation failed for line {line_count}: {tts_err}")
 
     if len(embeds) > 10:
         embeds = embeds[:10]
@@ -679,10 +681,10 @@ async def run_ask_job(
     try:
         raw_response = await request_openrouter_script(prompt, chosen_model)
         if not raw_response:
-            await interaction.followup.send("<:emoji_name:emoji_id> Empty response or blocked prompt.")
+            await interaction.followup.send("<EMOJI_NAME and EMOJI_ID> Empty response or blocked prompt.")
             return
     except Exception as e:
-        await interaction.followup.send(f"<:emoji_name:emoji_id> Failed to answer prompt ({chosen_model}): {e}")
+        await interaction.followup.send(f"<EMOJI_NAME and EMOJI_ID> Failed to answer prompt ({chosen_model}): {e}")
         return
 
     words = raw_response.split()
@@ -976,7 +978,7 @@ async def previewtext(
         await interaction.followup.send(file=result_file)
 
     except Exception as e:
-        await interaction.followup.send(f"Failed to process image: {e}")
+        await interaction.followup.send(f"<<EMOJI_NAME and EMOJI_ID> Failed to process image: {e}")
 
 
 @bot.tree.command(name="version", description="Check current bot version status.")
