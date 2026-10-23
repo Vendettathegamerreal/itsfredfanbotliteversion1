@@ -23,6 +23,7 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
+# emoji name and emoji id
 EPISODE_EMOJI = "EMOJI_NAME and EMOJI_ID"
 OVERLAY_FILENAME = "overlay.png"
 DATA_FILE = "bot_data.json"
