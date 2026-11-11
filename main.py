@@ -23,7 +23,6 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
-# emoji name and emoji id
 EPISODE_EMOJI = "EMOJI_NAME and EMOJI_ID"
 OVERLAY_FILENAME = "overlay.png"
 DATA_FILE = "bot_data.json"
@@ -76,6 +75,7 @@ GUILD_USER_CHARACTERS = {}
 FISH_AUDIO_VOICES = {
     "Fred": "32208204a35345d49177a91121928b6c",
     "Kevin": "d9688399ca654cb8a0bc8a5f87b4eca8",
+    "BotMaxim": "7bc2fefc70144aa4b7d2dc811ace7ab4",
 }
 
 
@@ -335,12 +335,9 @@ MODEL_CHOICES = [
     app_commands.Choice(name="Gemini 3.1 Flash Lite", value="gemini-3.1-flash-lite"),
     app_commands.Choice(name="Gemini 3.5 Flash Lite", value="gemini-3.5-flash-lite"),
     app_commands.Choice(name="Gemini 3.8 Flash (ratelimited)", value="gemini-3.8-flash"),
-    app_commands.Choice(name="Dots Studio: Dots3-Note Preview (free)", value="dots-studio/dots-3-note-preview:free"),
-    app_commands.Choice(name="Gemini 3.5 Flash", value="gemini-3.5-flash"),
-    app_commands.Choice(name="NVIDIA: Nemotron 3 Super (free)", value="nvidia/nemotron-3-super-120b-a12b:free"),
+    app_commands.Choice(name="NVIDIA: Nemotron 3 Nano Omni (free)", value="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"),
     app_commands.Choice(name="NVIDIA: Nemotron 3 Ultra (free)", value="nvidia/nemotron-3-ultra-550b-a55b:free"),
-    app_commands.Choice(name="NVIDIA: Nemotron 3.5 Lightning", value="nvidia/nemotron-3.5-lightning:free"),
-    app_commands.Choice(name="inclusionAI: Ling 3.0 Flash Sante (free)", value="inclusionai/ling-3.0-flash-sante:free"),
+    app_commands.Choice(name="Baidu: ERNIE-5.5-Flash-Preview (free)", value="baidu/ernie-5.5-flash-preview:free"),
 ]
 
 
@@ -575,7 +572,7 @@ async def run_episode_job(
                 try:
                     if tts_engine == "fish_audio":
                         ref_id = FISH_AUDIO_VOICES.get(
-                            speaker_key, "11b604a2d4a74323872c29c25ff62be3"
+                            speaker_key, "7bc2fefc70144aa4b7d2dc811ace7ab4"
                         )
                         audio_stream = await generate_fish_audio_tts(
                             dialogue, ref_id
@@ -623,6 +620,7 @@ async def run_episode_job(
     character=[
         app_commands.Choice(name="Fred (Fred Figglehorn)", value="Fred"),
         app_commands.Choice(name="Kevin", value="Kevin"),
+        app_commands.Choice(name="Бот Максим", value="BotMaxim"),
     ],
     engine=[
         app_commands.Choice(name="Edge-TTS (Free)", value="edge_tts"),
@@ -641,7 +639,17 @@ async def tts_command(
 
     chosen_engine = engine.value if engine else "edge_tts"
     char_key = character.value
-    char_data = DEFAULT_CHARACTERS.get(char_key, DEFAULT_CHARACTERS["Fred"])
+    
+    # Custom fallback data for BotMaxim if selected in /tts since it's not in DEFAULT_CHARACTERS anymore
+    if char_key == "BotMaxim":
+        char_data = {
+            "name": "Бот Максим",
+            "avatar": "https://i.pinimg.com/736x/c9/f7/12/c9f712fe42b39c5651b214ca8efdc6a3.jpg",
+            "color": discord.Color.purple(),
+            "voice": "ru-RU-DmitryNeural",
+        }
+    else:
+        char_data = DEFAULT_CHARACTERS.get(char_key, DEFAULT_CHARACTERS["Fred"])
 
     if chosen_engine == "fish_audio" and not OPENROUTER_API_KEY:
         await interaction.response.send_message("OpenRouter API key is missing for Fish Audio TTS.", ephemeral=True)
@@ -651,7 +659,7 @@ async def tts_command(
 
     try:
         if chosen_engine == "fish_audio":
-            ref_id = FISH_AUDIO_VOICES.get(char_key, "32208204a35345d49177a91121928b6c")
+            ref_id = FISH_AUDIO_VOICES.get(char_key, "7bc2fefc70144aa4b7d2dc811ace7ab4")
             audio_stream = await generate_fish_audio_tts(text, ref_id)
         else:
             voice_name = char_data.get("voice", "en-GB-ThomasNeural")
@@ -670,6 +678,43 @@ async def tts_command(
         await interaction.followup.send(embed=embed, file=file)
     except Exception as e:
         await interaction.followup.send(f"Failed to generate TTS audio: {e}")
+
+
+@bot.tree.command(name="tts2", description="Generate custom voice TTS audio using Fish Audio with a custom reference ID.")
+@app_commands.describe(
+    text="The text you want to convert into speech",
+    voice_id="The Fish Audio model/reference ID (e.g. 7bc2fefc70144aa4b7d2dc811ace7ab4)"
+)
+async def tts2_command(
+    interaction: discord.Interaction,
+    text: str,
+    voice_id: str = "7bc2fefc70144aa4b7d2dc811ace7ab4"
+):
+    if len(text) > 300:
+        await interaction.response.send_message("Text cannot exceed 300 characters.", ephemeral=True)
+        return
+
+    if not OPENROUTER_API_KEY:
+        await interaction.response.send_message("OpenRouter API key is missing for Fish Audio TTS.", ephemeral=True)
+        return
+
+    await interaction.response.defer()
+
+    try:
+        audio_stream = await generate_fish_audio_tts(text, voice_id)
+        file = discord.File(audio_stream, filename="result2.mp3")
+        
+        embed = discord.Embed(
+            title="🗣️ Custom Fish Audio TTS",
+            description=f'"{text}"',
+            color=discord.Color.purple()
+        )
+        embed.add_field(name="Voice ID", value=f"`{voice_id}`", inline=False)
+        embed.set_footer(text="Engine: Fish Audio via OpenRouter")
+
+        await interaction.followup.send(embed=embed, file=file)
+    except Exception as e:
+        await interaction.followup.send(f"Failed to generate custom TTS audio: {e}")
 
 
 async def run_ask_job(
@@ -979,7 +1024,7 @@ async def previewtext(
         await interaction.followup.send(file=result_file)
 
     except Exception as e:
-        await interaction.followup.send(f"<<EMOJI_NAME and EMOJI_ID> Failed to process image: {e}")
+        await interaction.followup.send(f"<EMOJI_NAME and EMOJI_ID> Failed to process image: {e}")
 
 
 @bot.tree.command(name="version", description="Check current bot version status.")
@@ -1003,6 +1048,8 @@ async def help_command(interaction: discord.Interaction):
     help_text = (
         "**/episode [topic] [turns] [model] [tts]** - Generate an AI parody script (Queued)\n"
         "**/ask [prompt] [model]** - Ask the AI a direct question (Queued)\n"
+        "**/tts [text] [character] [engine]** - Generate speech for presets\n"
+        "**/tts2 [text] [voice_id]** - Generate custom Fish Audio voice TTS\n"
         "**/ping** - Check bot online status & latency\n"
         "**/queue** - Check details of active/queued requests\n"
         "**/previewtext [image]** - Add preview text overlay to an image\n"
