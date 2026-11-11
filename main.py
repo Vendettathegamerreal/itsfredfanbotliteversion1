@@ -644,7 +644,7 @@ async def tts_command(
     if char_key == "BotMaxim":
         char_data = {
             "name": "Бот Максим",
-            "avatar": "https://i.pinimg.com/736x/c9/f7/12/c9f712fe42b39c5651b214ca8efdc6a3.jpg",
+            "avatar": "https://i.ibb.co/hJqM3t7b/images.jpg",
             "color": discord.Color.purple(),
             "voice": "ru-RU-DmitryNeural",
         }
